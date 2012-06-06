@@ -89,6 +89,8 @@ class Dummy_Payment_Controller extends Payment_Controller {
     // Nothing to do here...
   }
 
+
+
   
   /**
    * Override to add payment id to the link
