@@ -1,10 +1,51 @@
 <?php
 
+
 /**
  * Object representing a dummy payment gateway
  */
-class Dummy_Payment extends Payment_MerchantHosted {
+class Dummy_Payment extends Payment {
+
+  public function getControllerClassName() {
+    //This is where we can specify the type of controller that we need
+    //Check environment, add a hook so this can be decorated, overloaded etc.
+
+    $className = 'Dummy_Payment_Controller';
+    if (!class_exists($className)) {
+      user_error("Payment gateway class is not defined", E_USER_ERROR);
+    }
+
+    return $className;
+  }
   
+  public function getFormFields() {
+    parent::getFormFields();
+
+    $this->formFields->push(new TextField('PaymentMethod', 'Payment Method', get_class($this)));
+    $this->formFields->push(new NumericField('Amount', 'Amount', '10.00'));
+    $this->formFields->push(new TextField('Currency', 'Currency', 'NZD'));
+
+    return $this->formFields;
+  }
+}
+
+class Dummy_Payment_MerchantHosted extends Dummy_Payment {
+
+  public function getFormFields() {
+    parent::getFormFields();
+
+    $fields = new FieldList(
+        new TextField('CardHolderName', 'Credit Card Holder Name :'),
+        new CreditCardField('CardNumber', 'Credit Card Number :'),
+        new TextField('DateExpiry', 'Credit Card Expiry : (MMYY)', '', 4)
+    );
+
+    return $fields;
+  }
+}
+
+class Dummy_Payment_GatewayHosted extends Dummy_Payment {
+
 }
 
 /**
@@ -23,6 +64,31 @@ class Dummy_Payment_Controller extends Payment_Controller {
       user_error('Test mode not supported', E_USER_ERROR);
     }
   }
+
+  public function processRequest($data) {
+
+    parent::processRequest($data);
+
+    // Redirect to the return url
+    switch (self::$test_mode) {
+      case 'success':
+        $this->payment->Status = 'Success';
+        $this->payment->write();
+        break;
+      case 'cancel':
+        $this->payment->Status = 'Failure';
+        $this->payment->write();
+        break;
+    } 
+
+    //TODO should we return payment or some alternative like Payment_Result class?
+    return $this->payment;  
+  }
+
+  public function processResponse($response) {
+    // Nothing to do here...
+  }
+
   
   /**
    * Override to add payment id to the link
@@ -39,19 +105,32 @@ class Dummy_Payment_Controller extends Payment_Controller {
     return self::$URLSegment . '/cancel/' . $this->payment->ID;
   }
   
-  public function processRequest($data) {
-    // Redirect to the return url
-    switch (self::$test_mode) {
-      case 'success':
-        Director::redirect(Director::absoluteBaseURL() . $this->complete_link());
-        break;
-      case 'cancel':
-        Director::redirect(Director::absoluteBaseURL() . $this->cancel_link());
-    }    
+  /**
+   * Payment complete handler. 
+   * This function should be persistent accross all payment gateways.
+   * Additional processing of payment response can be done in processResponse(). 
+   */
+  public function complete($request) {
+
+
+    // Additional processing
+    $this->processResponse($request);        
+    // Update payment status    
+    $payment = $this->updatePaymentStatus($request, 'Success');
+    
+    return $payment->renderWith($payment->class . "_complete");
   }
   
-  public function processResponse($response) {
-    // Nothing to do here...
+  /**
+   * Payment cancel handler
+   */
+  public function cancel($request) {
+    // Additional processing
+    $this->processResponse($request);
+    // Update payment status
+    $payment = $this->updatePaymentStatus($request, 'Incomplete');
+    
+    return $payment->renderWith($payment->class . "_cancel");
   }
   
   public function getPaymentID($response) {
